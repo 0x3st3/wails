@@ -1639,6 +1639,28 @@ func (w *macosWebviewWindow) run() {
 			w.setURL(startURL)
 		}
 
+		shown := false
+		showNow := func() {
+			shown = true
+			w.parent.Show()
+			w.setHasShadow(!options.Mac.DisableShadow)
+			w.setAlwaysOnTop(options.AlwaysOnTop)
+		}
+
+		// Remote-content windows (proxy/cookies) are shown on first paint so a
+		// slow proxied page doesn't leave the window invisible for seconds.
+		if options.isIsolatedSession() && !options.Hidden {
+			var cancelCommit func()
+			cancelCommit = w.parent.OnWindowEvent(events.Mac.WebViewDidCommitNavigation, func(_ *WindowEvent) {
+				InvokeAsync(func() {
+					if !shown {
+						showNow()
+					}
+					cancelCommit()
+				})
+			})
+		}
+
 		// We need to wait for the HTML to load before we can execute the javascript
 		w.parent.OnWindowEvent(events.Mac.WebViewDidFinishNavigation, func(_ *WindowEvent) {
 			InvokeAsync(func() {
@@ -1648,10 +1670,11 @@ func (w *macosWebviewWindow) run() {
 				if options.CSS != "" {
 					C.windowInjectCSS(w.nsWindow, C.CString(options.CSS))
 				}
+				if shown {
+					return
+				}
 				if !options.Hidden {
-					w.parent.Show()
-					w.setHasShadow(!options.Mac.DisableShadow)
-					w.setAlwaysOnTop(options.AlwaysOnTop)
+					showNow()
 				} else {
 					// We have to wait until the window is shown before we can remove the shadow
 					var cancel func()
