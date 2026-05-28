@@ -126,6 +126,14 @@ func (i *ICoreWebView2Controller) PutIsVisible(isVisible bool) error {
 	return nil
 }
 
+func (i *ICoreWebView2Controller) Close() error {
+	hr, _, _ := i.vtbl.Close.Call(uintptr(unsafe.Pointer(i)))
+	if windows.Handle(hr) != windows.S_OK {
+		return windows.Errno(hr)
+	}
+	return nil
+}
+
 func (i *ICoreWebView2Controller) GetICoreWebView2Controller2() *ICoreWebView2Controller2 {
 
 	var result *ICoreWebView2Controller2

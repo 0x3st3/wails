@@ -135,6 +135,12 @@ void* windowNew(unsigned int id, int width, int height, bool fraudulentWebsiteWa
 				dataStore = [WKWebsiteDataStore nonPersistentDataStore];
 			}
 			dataStore.proxyConfigurations = @[ proxyCfg ];
+			// MRC: the data store's array now owns these; drop our create (+1) refs.
+			nw_release(proxyCfg);
+			nw_release(endpoint);
+			if (tlsOpts != NULL) {
+				nw_release(tlsOpts);
+			}
 		} else {
 			NSLog(@"[wails] proxy requested but macOS 14+ is required; running without a proxy");
 		}

@@ -1532,6 +1532,12 @@ func (w *windowsWebviewWindow) WndProc(msg uint32, wparam, lparam uintptr) uintp
 
 		// Now do the actual close
 		w.chromium.ShuttingDown()
+		// Close the WebView2 controller while the HWND is still valid so an
+		// isolated per-window environment's host process exits and releases the
+		// lock on its user-data folder (which destroy() then removes).
+		if w.isolatedDataPath != "" {
+			w.chromium.Close()
+		}
 		return w32.DefWindowProc(w.hwnd, w32.WM_CLOSE, 0, 0)
 
 	case w32.WM_KILLFOCUS:
