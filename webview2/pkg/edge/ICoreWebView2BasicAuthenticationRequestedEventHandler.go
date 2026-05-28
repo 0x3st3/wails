@@ -1,0 +1,50 @@
+//go:build windows
+
+package edge
+
+type _ICoreWebView2BasicAuthenticationRequestedEventHandlerVtbl struct {
+	_IUnknownVtbl
+	Invoke ComProc
+}
+
+type iCoreWebView2BasicAuthenticationRequestedEventHandler struct {
+	vtbl *_ICoreWebView2BasicAuthenticationRequestedEventHandlerVtbl
+	impl _ICoreWebView2BasicAuthenticationRequestedEventHandlerImpl
+}
+
+func _ICoreWebView2BasicAuthenticationRequestedEventHandlerIUnknownQueryInterface(this *iCoreWebView2BasicAuthenticationRequestedEventHandler, refiid, object uintptr) uintptr {
+	return this.impl.QueryInterface(refiid, object)
+}
+
+func _ICoreWebView2BasicAuthenticationRequestedEventHandlerIUnknownAddRef(this *iCoreWebView2BasicAuthenticationRequestedEventHandler) uintptr {
+	return this.impl.AddRef()
+}
+
+func _ICoreWebView2BasicAuthenticationRequestedEventHandlerIUnknownRelease(this *iCoreWebView2BasicAuthenticationRequestedEventHandler) uintptr {
+	return this.impl.Release()
+}
+
+func _ICoreWebView2BasicAuthenticationRequestedEventHandlerInvoke(this *iCoreWebView2BasicAuthenticationRequestedEventHandler, sender *ICoreWebView2, args *ICoreWebView2BasicAuthenticationRequestedEventArgs) uintptr {
+	return this.impl.BasicAuthenticationRequested(sender, args)
+}
+
+type _ICoreWebView2BasicAuthenticationRequestedEventHandlerImpl interface {
+	_IUnknownImpl
+	BasicAuthenticationRequested(sender *ICoreWebView2, args *ICoreWebView2BasicAuthenticationRequestedEventArgs) uintptr
+}
+
+var _ICoreWebView2BasicAuthenticationRequestedEventHandlerFn = _ICoreWebView2BasicAuthenticationRequestedEventHandlerVtbl{
+	_IUnknownVtbl{
+		NewComProc(_ICoreWebView2BasicAuthenticationRequestedEventHandlerIUnknownQueryInterface),
+		NewComProc(_ICoreWebView2BasicAuthenticationRequestedEventHandlerIUnknownAddRef),
+		NewComProc(_ICoreWebView2BasicAuthenticationRequestedEventHandlerIUnknownRelease),
+	},
+	NewComProc(_ICoreWebView2BasicAuthenticationRequestedEventHandlerInvoke),
+}
+
+func newICoreWebView2BasicAuthenticationRequestedEventHandler(impl _ICoreWebView2BasicAuthenticationRequestedEventHandlerImpl) *iCoreWebView2BasicAuthenticationRequestedEventHandler {
+	return &iCoreWebView2BasicAuthenticationRequestedEventHandler{
+		vtbl: &_ICoreWebView2BasicAuthenticationRequestedEventHandlerFn,
+		impl: impl,
+	}
+}

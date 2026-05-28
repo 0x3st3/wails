@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,6 +56,10 @@ type windowsWebviewWindow struct {
 	// Webview
 	chromium                   *edge.Chromium
 	webviewNavigationCompleted bool
+
+	// isolatedDataPath is the per-window WebView2 user-data folder used when
+	// the window has a proxy or injected cookies. Empty for the shared store.
+	isolatedDataPath string
 
 	// Window visibility management - robust fallback for issue #2861
 	showRequested     bool        // Track if show() was called before navigation completed
@@ -797,6 +803,16 @@ func (w *windowsWebviewWindow) destroy() {
 	w.parent.markAsDestroyed()
 	// destroy the window
 	w32.DestroyWindow(w.hwnd)
+
+	if w.isolatedDataPath != "" {
+		path := w.isolatedDataPath
+		w.isolatedDataPath = ""
+		go func() {
+			// Give the WebView2 host process time to release its file handles.
+			time.Sleep(2 * time.Second)
+			_ = os.RemoveAll(path)
+		}()
+	}
 }
 
 func (w *windowsWebviewWindow) reload() {
@@ -2051,6 +2067,41 @@ func (w *windowsWebviewWindow) setupChromium() {
 	chromium.DataPath = globalApplication.options.Windows.WebviewUserDataPath
 	chromium.BrowserPath = globalApplication.options.Windows.WebviewBrowserPath
 
+	// Per-window proxy + isolated session (fork extension). --proxy-server is an
+	// environment-level Chromium flag, and an isolated session needs its own
+	// user-data folder, so these windows get a unique DataPath.
+	if w.parent.options.isIsolatedSession() {
+		isolatedPath, perr := makeIsolatedWebviewDataPath(w.parent.id)
+		if perr != nil {
+			globalApplication.handleFatalError(perr)
+		}
+		chromium.DataPath = isolatedPath
+		w.isolatedDataPath = isolatedPath
+	}
+	if proxy := w.parent.options.Proxy; proxy != nil {
+		serverArg, perr := webviewProxyServerArg(proxy.Server)
+		if perr != nil {
+			globalApplication.error("invalid proxy URL %q: %v", proxy.Server, perr)
+		} else {
+			chromium.AdditionalBrowserArgs = append(chromium.AdditionalBrowserArgs, "--proxy-server="+serverArg)
+			if proxy.Username != "" {
+				user, pass := proxy.Username, proxy.Password
+				chromium.BasicAuthenticationCallback = func(uri, challenge string, response *edge.ICoreWebView2BasicAuthenticationResponse) {
+					// Only answer proxy challenges; origin 401s must not receive proxy creds.
+					if !strings.HasPrefix(strings.ToLower(challenge), "proxy") {
+						return
+					}
+					if err := response.PutUserName(user); err != nil {
+						globalApplication.error("failed to set proxy username: %v", err)
+					}
+					if err := response.PutPassword(pass); err != nil {
+						globalApplication.error("failed to set proxy password: %v", err)
+					}
+				}
+			}
+		}
+	}
+
 	if opts.Permissions != nil {
 		for permission, state := range opts.Permissions {
 			chromium.SetPermission(edge.CoreWebView2PermissionKind(permission),
@@ -2131,6 +2182,12 @@ func (w *windowsWebviewWindow) setupChromium() {
 		globalApplication.handleFatalError(err)
 	}
 
+	if ua := w.parent.options.UserAgent; ua != "" {
+		if err := settings.PutUserAgent(ua); err != nil {
+			globalApplication.error("failed to set user agent: %v", err)
+		}
+	}
+
 	w.enableDevTools(settings)
 
 	if w.parent.options.Zoom > 0.0 {
@@ -2170,6 +2227,10 @@ func (w *windowsWebviewWindow) setupChromium() {
 	chromium.SetGlobalPermission(edge.CoreWebView2PermissionStateAllow)
 	chromium.AddWebResourceRequestedFilter("*", edge.COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)
 
+	if len(w.parent.options.Cookies) > 0 {
+		w.injectCookies(w.parent.options.Cookies)
+	}
+
 	if w.parent.options.HTML != "" {
 		var script string
 		if w.parent.options.JS != "" {
@@ -2194,6 +2255,44 @@ func (w *windowsWebviewWindow) setupChromium() {
 		chromium.Navigate(startURL)
 	}
 
+}
+
+// injectCookies writes the given cookies into the window's cookie store. It runs
+// before navigation; WebView2's AddOrUpdateCookie is synchronous, so the cookies
+// are present for the initial request.
+func (w *windowsWebviewWindow) injectCookies(cookies []WebviewCookie) {
+	cm, err := w.chromium.GetCookieManager()
+	if err != nil {
+		globalApplication.error("cookie manager unavailable: %v", err)
+		return
+	}
+	defer cm.Release()
+	for _, c := range cookies {
+		cookie, err := cm.CreateCookie(c.Name, c.Value, c.Domain, c.Path)
+		if err != nil {
+			globalApplication.error("failed to create cookie %q: %v", c.Name, err)
+			continue
+		}
+		if c.Expires > 0 {
+			_ = cookie.PutExpires(float64(c.Expires))
+		}
+		_ = cookie.PutIsSecure(c.Secure)
+		_ = cookie.PutIsHttpOnly(c.HttpOnly)
+		if err := cm.AddOrUpdateCookie(cookie); err != nil {
+			globalApplication.error("failed to add cookie %q: %v", c.Name, err)
+		}
+		cookie.Release()
+	}
+}
+
+// makeIsolatedWebviewDataPath returns a fresh per-window WebView2 user-data
+// folder, used to isolate proxy/cookie windows from the shared session.
+func makeIsolatedWebviewDataPath(windowID uint) (string, error) {
+	path := filepath.Join(os.TempDir(), "wails-webview2-isolated", fmt.Sprintf("w%d-%d", windowID, time.Now().UnixNano()))
+	if err := os.MkdirAll(path, 0700); err != nil {
+		return "", fmt.Errorf("failed to create isolated webview data path: %w", err)
+	}
+	return path, nil
 }
 
 func (w *windowsWebviewWindow) fullscreenChanged(

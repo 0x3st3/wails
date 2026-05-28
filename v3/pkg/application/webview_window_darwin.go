@@ -4,7 +4,7 @@ package application
 
 /*
 #cgo CFLAGS: -mmacosx-version-min=10.13 -x objective-c
-#cgo LDFLAGS: -framework Cocoa -framework WebKit -framework QuartzCore
+#cgo LDFLAGS: -framework Cocoa -framework WebKit -framework QuartzCore -framework Network
 
 #include "application_darwin.h"
 #include "webview_window_darwin.h"
@@ -12,6 +12,7 @@ package application
 #include "Cocoa/Cocoa.h"
 #import <WebKit/WebKit.h>
 #import <AppKit/AppKit.h>
+#import <Network/Network.h>
 #import "webview_window_darwin_drag.h"
 
 struct WebviewPreferences {
@@ -21,10 +22,20 @@ struct WebviewPreferences {
     bool *AllowsBackForwardNavigationGestures;
 };
 
+typedef struct {
+    const char* name;
+    const char* value;
+    const char* domain;
+    const char* path;
+    long long expires;
+    bool secure;
+    bool httpOnly;
+} WebviewCookieC;
+
 extern void registerListener(unsigned int event);
 
 // Create a new Window
-void* windowNew(unsigned int id, int width, int height, bool fraudulentWebsiteWarningEnabled, bool frameless, bool enableDragAndDrop, struct WebviewPreferences preferences) {
+void* windowNew(unsigned int id, int width, int height, bool fraudulentWebsiteWarningEnabled, bool frameless, bool enableDragAndDrop, struct WebviewPreferences preferences, bool isolated, const char* proxyHost, int proxyPort, const char* proxyScheme, const char* proxyUser, const char* proxyPass, const char* userAgent) {
 	NSWindowStyleMask styleMask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
 	if (frameless) {
 		styleMask = NSWindowStyleMaskBorderless | NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable;
@@ -99,8 +110,48 @@ void* windowNew(unsigned int id, int width, int height, bool fraudulentWebsiteWa
     [userContentController addScriptMessageHandler:delegate name:@"external"];
     config.userContentController = userContentController;
 
+	// Isolated session and/or per-window proxy. A non-persistent data store
+	// keeps cookies/cache in memory only, so this window shares no session
+	// state with the main window.
+	WKWebsiteDataStore* dataStore = nil;
+	if (isolated) {
+		dataStore = [WKWebsiteDataStore nonPersistentDataStore];
+	}
+	if (proxyHost != NULL) {
+#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 140000
+		if (@available(macOS 14.0, *)) {
+			char portBuf[16];
+			snprintf(portBuf, sizeof(portBuf), "%d", proxyPort);
+			nw_endpoint_t endpoint = nw_endpoint_create_host(proxyHost, portBuf);
+			nw_protocol_options_t tlsOpts = NULL;
+			if (proxyScheme != NULL && strcmp(proxyScheme, "https") == 0) {
+				tlsOpts = nw_tls_create_options();
+			}
+			nw_proxy_config_t proxyCfg = nw_proxy_config_create_http_connect(endpoint, tlsOpts);
+			if (proxyUser != NULL) {
+				nw_proxy_config_set_username_and_password(proxyCfg, proxyUser, (proxyPass != NULL ? proxyPass : ""));
+			}
+			if (dataStore == nil) {
+				dataStore = [WKWebsiteDataStore nonPersistentDataStore];
+			}
+			dataStore.proxyConfigurations = @[ proxyCfg ];
+		} else {
+			NSLog(@"[wails] proxy requested but macOS 14+ is required; running without a proxy");
+		}
+#else
+		NSLog(@"[wails] built against macOS SDK < 14.0; webview proxy support unavailable");
+#endif
+	}
+	if (dataStore != nil) {
+		config.websiteDataStore = dataStore;
+	}
+
 	WKWebView* webView = [[WKWebView alloc] initWithFrame:frame configuration:config];
 	[webView autorelease];
+
+	if (userAgent != NULL) {
+		webView.customUserAgent = [NSString stringWithUTF8String:userAgent];
+	}
 
     // Set allowsBackForwardNavigationGestures if specified
     if (preferences.AllowsBackForwardNavigationGestures != NULL) {
@@ -256,6 +307,59 @@ void navigationLoadURL(void* nsWindow, char* url) {
 	WebviewWindow* window = (WebviewWindow*)nsWindow;
 	[window.webView loadRequest:request];
 	free(url);
+}
+
+// Inject cookies into the window's cookie store, then navigate to url once
+// every cookie has been written. WKHTTPCookieStore completion handlers run on
+// the main thread, so we chain navigation off the last completion instead of
+// blocking (which would deadlock the main thread).
+void webviewSetCookiesAndNavigate(void* nsWindow, WebviewCookieC* cookies, int count, const char* url) {
+	WebviewWindow* window = (WebviewWindow*)nsWindow;
+	WKWebView* webView = window.webView;
+	if (webView == nil) {
+		return;
+	}
+
+	NSURL* nsURL = [NSURL URLWithString:[NSString stringWithUTF8String:url]];
+	NSURLRequest* request = [NSURLRequest requestWithURL:nsURL];
+
+	NSMutableArray<NSHTTPCookie*>* cookieObjs = [NSMutableArray arrayWithCapacity:count];
+	for (int i = 0; i < count; i++) {
+		NSMutableDictionary* props = [NSMutableDictionary dictionary];
+		props[NSHTTPCookieName] = [NSString stringWithUTF8String:cookies[i].name];
+		props[NSHTTPCookieValue] = [NSString stringWithUTF8String:cookies[i].value];
+		props[NSHTTPCookieDomain] = [NSString stringWithUTF8String:cookies[i].domain];
+		props[NSHTTPCookiePath] = [NSString stringWithUTF8String:cookies[i].path];
+		if (cookies[i].expires > 0) {
+			props[NSHTTPCookieExpires] = [NSDate dateWithTimeIntervalSince1970:(NSTimeInterval)cookies[i].expires];
+		}
+		if (cookies[i].secure) {
+			props[NSHTTPCookieSecure] = @YES;
+		}
+		if (cookies[i].httpOnly) {
+			props[@"HttpOnly"] = @YES;
+		}
+		NSHTTPCookie* cookie = [NSHTTPCookie cookieWithProperties:props];
+		if (cookie != nil) {
+			[cookieObjs addObject:cookie];
+		}
+	}
+
+	if (cookieObjs.count == 0) {
+		[webView loadRequest:request];
+		return;
+	}
+
+	WKHTTPCookieStore* store = webView.configuration.websiteDataStore.httpCookieStore;
+	__block NSInteger remaining = cookieObjs.count;
+	for (NSHTTPCookie* cookie in cookieObjs) {
+		[store setCookie:cookie completionHandler:^{
+			remaining--;
+			if (remaining == 0) {
+				[webView loadRequest:request];
+			}
+		}];
+	}
 }
 
 // Set NSWindow resizable
@@ -1210,6 +1314,40 @@ func (w *macosWebviewWindow) setURL(uri string) {
 	C.navigationLoadURL(w.nsWindow, C.CString(uri))
 }
 
+func (w *macosWebviewWindow) setCookiesAndNavigate(cookies []WebviewCookie, uri string) {
+	n := len(cookies)
+	carr := (*C.WebviewCookieC)(C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(C.WebviewCookieC{}))))
+	defer C.free(unsafe.Pointer(carr))
+	slice := unsafe.Slice(carr, n)
+
+	var toFree []unsafe.Pointer
+	defer func() {
+		for _, p := range toFree {
+			C.free(p)
+		}
+	}()
+	for i, c := range cookies {
+		name := C.CString(c.Name)
+		value := C.CString(c.Value)
+		domain := C.CString(c.Domain)
+		path := C.CString(c.Path)
+		toFree = append(toFree, unsafe.Pointer(name), unsafe.Pointer(value), unsafe.Pointer(domain), unsafe.Pointer(path))
+		slice[i] = C.WebviewCookieC{
+			name:     name,
+			value:    value,
+			domain:   domain,
+			path:     path,
+			expires:  C.longlong(c.Expires),
+			secure:   C.bool(c.Secure),
+			httpOnly: C.bool(c.HttpOnly),
+		}
+	}
+
+	cURL := C.CString(uri)
+	defer C.free(unsafe.Pointer(cURL))
+	C.webviewSetCookiesAndNavigate(w.nsWindow, carr, C.int(n), cURL)
+}
+
 func (w *macosWebviewWindow) setAlwaysOnTop(alwaysOnTop bool) {
 	C.windowSetAlwaysOnTop(w.nsWindow, C.bool(alwaysOnTop))
 }
@@ -1351,6 +1489,31 @@ func (w *macosWebviewWindow) run() {
 		options := w.parent.options
 		macOptions := options.Mac
 
+		var cProxyHost, cProxyScheme, cProxyUser, cProxyPass, cUserAgent *C.char
+		var cProxyPort C.int
+		if p := options.Proxy; p != nil {
+			host, port, scheme, perr := parseWebviewProxyServer(p.Server)
+			if perr != nil {
+				globalApplication.error("invalid proxy URL %q: %v", p.Server, perr)
+			} else {
+				cProxyHost = C.CString(host)
+				defer C.free(unsafe.Pointer(cProxyHost))
+				cProxyScheme = C.CString(scheme)
+				defer C.free(unsafe.Pointer(cProxyScheme))
+				cProxyPort = C.int(port)
+				if p.Username != "" {
+					cProxyUser = C.CString(p.Username)
+					defer C.free(unsafe.Pointer(cProxyUser))
+					cProxyPass = C.CString(p.Password)
+					defer C.free(unsafe.Pointer(cProxyPass))
+				}
+			}
+		}
+		if options.UserAgent != "" {
+			cUserAgent = C.CString(options.UserAgent)
+			defer C.free(unsafe.Pointer(cUserAgent))
+		}
+
 		w.nsWindow = C.windowNew(C.uint(w.parent.id),
 			C.int(options.Width),
 			C.int(options.Height),
@@ -1358,6 +1521,13 @@ func (w *macosWebviewWindow) run() {
 			C.bool(options.Frameless),
 			C.bool(options.EnableFileDrop),
 			w.getWebviewPreferences(),
+			C.bool(options.isIsolatedSession()),
+			cProxyHost,
+			cProxyPort,
+			cProxyScheme,
+			cProxyUser,
+			cProxyPass,
+			cUserAgent,
 		)
 		if macOptions.DisableEscapeExitsFullscreen {
 			C.windowSetDisableEscapeExitsFullscreen(w.nsWindow, C.bool(true))
@@ -1463,7 +1633,11 @@ func (w *macosWebviewWindow) run() {
 			globalApplication.handleFatalError(err)
 		}
 
-		w.setURL(startURL)
+		if len(options.Cookies) > 0 {
+			w.setCookiesAndNavigate(options.Cookies, startURL)
+		} else {
+			w.setURL(startURL)
+		}
 
 		// We need to wait for the HTML to load before we can execute the javascript
 		w.parent.OnWindowEvent(events.Mac.WebViewDidFinishNavigation, func(_ *WindowEvent) {

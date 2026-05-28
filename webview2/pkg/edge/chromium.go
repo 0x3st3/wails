@@ -67,6 +67,7 @@ type Chromium struct {
 	acceleratorKeyPressed            *ICoreWebView2AcceleratorKeyPressedEventHandler
 	navigationCompleted              *ICoreWebView2NavigationCompletedEventHandler
 	processFailed                    *ICoreWebView2ProcessFailedEventHandler
+	basicAuthRequested               *iCoreWebView2BasicAuthenticationRequestedEventHandler
 
 	environment            *ICoreWebView2Environment
 	webview2RuntimeVersion string
@@ -89,6 +90,7 @@ type Chromium struct {
 	ProcessFailedCallback                    func(sender *ICoreWebView2, args *ICoreWebView2ProcessFailedEventArgs)
 	ContainsFullScreenElementChangedCallback func(sender *ICoreWebView2, args *ICoreWebView2ContainsFullScreenElementChangedEventArgs)
 	AcceleratorKeyCallback                   func(uint) bool
+	BasicAuthenticationCallback              func(uri, challenge string, response *ICoreWebView2BasicAuthenticationResponse)
 
 	// Error handling
 	globalErrorCallback func(error)
@@ -122,6 +124,7 @@ func NewChromium() *Chromium {
 	e.navigationCompleted = newICoreWebView2NavigationCompletedEventHandler(e)
 	e.processFailed = newICoreWebView2ProcessFailedEventHandler(e)
 	e.containsFullScreenElementChanged = newICoreWebView2ContainsFullScreenElementChangedEventHandler(e)
+	e.basicAuthRequested = newICoreWebView2BasicAuthenticationRequestedEventHandler(e)
 	/*
 		// Pinner seems to panic in some cases as reported on Discord, maybe during shutdown when GC detects pinned objects
 		// to be released that have not been unpinned.
@@ -386,8 +389,42 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 		e.errorCallback(err)
 	}
 
+	if e.BasicAuthenticationCallback != nil {
+		if v10 := e.webview.GetICoreWebView2_10(); v10 != nil {
+			defer v10.Release()
+			err = v10.AddBasicAuthenticationRequested(e.basicAuthRequested, &token)
+			if err != nil {
+				e.errorCallback(err)
+			}
+		}
+	}
+
 	atomic.StoreUintptr(&e.inited, 1)
 
+	return 0
+}
+
+func (e *Chromium) BasicAuthenticationRequested(sender *ICoreWebView2, args *ICoreWebView2BasicAuthenticationRequestedEventArgs) uintptr {
+	if e.BasicAuthenticationCallback == nil {
+		return 0
+	}
+	uri, err := args.GetUri()
+	if err != nil {
+		e.errorCallback(err)
+		return 0
+	}
+	challenge, err := args.GetChallenge()
+	if err != nil {
+		e.errorCallback(err)
+		return 0
+	}
+	response, err := args.GetResponse()
+	if err != nil {
+		e.errorCallback(err)
+		return 0
+	}
+	defer response.Release()
+	e.BasicAuthenticationCallback(uri, challenge, response)
 	return 0
 }
 
