@@ -110,9 +110,7 @@ void* windowNew(unsigned int id, int width, int height, bool fraudulentWebsiteWa
     [userContentController addScriptMessageHandler:delegate name:@"external"];
     config.userContentController = userContentController;
 
-	// Isolated session and/or per-window proxy. A non-persistent data store
-	// keeps cookies/cache in memory only, so this window shares no session
-	// state with the main window.
+	// A non-persistent store keeps this window's cookies/cache in memory only.
 	WKWebsiteDataStore* dataStore = nil;
 	if (isolated) {
 		dataStore = [WKWebsiteDataStore nonPersistentDataStore];
@@ -315,10 +313,8 @@ void navigationLoadURL(void* nsWindow, char* url) {
 	free(url);
 }
 
-// Inject cookies into the window's cookie store, then navigate to url once
-// every cookie has been written. WKHTTPCookieStore completion handlers run on
-// the main thread, so we chain navigation off the last completion instead of
-// blocking (which would deadlock the main thread).
+// Navigate only after the last cookie is written. setCookie completion handlers
+// run on the main thread, so we chain off them rather than block (would deadlock).
 void webviewSetCookiesAndNavigate(void* nsWindow, WebviewCookieC* cookies, int count, const char* url) {
 	WebviewWindow* window = (WebviewWindow*)nsWindow;
 	WKWebView* webView = window.webView;
@@ -1653,8 +1649,7 @@ func (w *macosWebviewWindow) run() {
 			w.setAlwaysOnTop(options.AlwaysOnTop)
 		}
 
-		// Remote-content windows (proxy/cookies) are shown on first paint so a
-		// slow proxied page doesn't leave the window invisible for seconds.
+		// Show isolated windows on first paint so a slow proxied page doesn't keep them invisible.
 		if options.isIsolatedSession() && !options.Hidden {
 			var cancelCommit func()
 			cancelCommit = w.parent.OnWindowEvent(events.Mac.WebViewDidCommitNavigation, func(_ *WindowEvent) {

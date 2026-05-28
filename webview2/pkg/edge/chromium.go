@@ -150,10 +150,8 @@ func (e *Chromium) ShuttingDown() {
 	e.shuttingDown = true
 }
 
-// Close tears down the WebView2 controller, which closes the underlying browser
-// instance and—when this was the last controller for its environment (as with
-// an isolated per-window UserDataFolder)—lets the host process exit and releases
-// the lock on the user-data folder.
+// Close tears down the controller; for an isolated per-window environment this
+// lets the host process exit and unlocks its user-data folder.
 func (e *Chromium) Close() {
 	if e.controller != nil {
 		_ = e.controller.Close()

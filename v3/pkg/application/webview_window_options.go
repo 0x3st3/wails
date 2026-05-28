@@ -154,23 +154,16 @@ type WebviewWindowOptions struct {
 	// OpenInspectorOnStartup will open the inspector when the window is first shown.
 	OpenInspectorOnStartup bool
 
-	// Proxy, when set, routes all of this window's traffic through an
-	// HTTP/HTTPS proxy. Setting Proxy or Cookies also gives the window an
-	// isolated cookie/cache store, so it does not share session state with
-	// the main window or other webviews.
-	// macOS 14+ is required for Proxy; on older macOS the window logs a
-	// warning and runs without a proxy.
+	// Proxy routes this window's traffic through an HTTP/HTTPS proxy and isolates
+	// its cookie/cache store. Requires macOS 14+ (older macOS runs without a proxy).
 	Proxy *WebviewProxy
 
-	// Cookies are injected into this window's cookie store before the initial
-	// navigation to URL. Setting Cookies gives the window an isolated session
-	// (same as Proxy). For runtime updates after load, use ExecJS to set
-	// document.cookie instead.
+	// Cookies are injected before the initial navigation and isolate the window's
+	// session. Use ExecJS to set document.cookie for updates after load.
 	Cookies []WebviewCookie
 
-	// UserAgent overrides the webview's User-Agent string for all requests.
-	// Empty uses the platform default (WKWebView reports Safari, WebView2
-	// reports Edge).
+	// UserAgent overrides the User-Agent for all requests. Empty uses the platform
+	// default (WKWebView reports Safari, WebView2 reports Edge).
 	UserAgent string
 
 	// Mac options
@@ -228,14 +221,10 @@ type WebviewWindowOptions struct {
 
 // WebviewProxy configures an HTTP/HTTPS proxy for a single webview window.
 type WebviewProxy struct {
-	// Server is the proxy URL, e.g. "http://host:port" or "https://host:port".
-	// Any user:pass embedded in the URL is ignored; use Username/Password.
-	Server string
-
-	// Username is the proxy authentication username (optional).
+	// Server is the proxy URL, e.g. "http://host:port". Any user:pass in the URL
+	// is ignored; use Username/Password.
+	Server   string
 	Username string
-
-	// Password is the proxy authentication password (optional).
 	Password string
 }
 
@@ -243,16 +232,13 @@ type WebviewProxy struct {
 type WebviewCookie struct {
 	Name     string
 	Value    string
-	Domain   string // e.g. ".amazon.fr"
-	Path     string // e.g. "/"
-	Expires  int64  // unix seconds; 0 means a session cookie
+	Domain   string
+	Path     string
+	Expires  int64 // unix seconds; 0 means a session cookie
 	Secure   bool
 	HttpOnly bool
 }
 
-// isIsolatedSession reports whether the window needs its own cookie/cache
-// store, separate from the main window. True when a proxy or injected
-// cookies are configured.
 func (o WebviewWindowOptions) isIsolatedSession() bool {
 	return o.Proxy != nil || len(o.Cookies) > 0
 }

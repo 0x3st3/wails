@@ -8,10 +8,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// These vtables build the cumulative method layout from ICoreWebView2_3 up to
-// ICoreWebView2_10 so that the COM method offsets are correct. Each struct
-// embeds the previous version and appends only the methods that version adds,
-// matching the WebView2 IDL ordering.
+// Cumulative vtables from _3 up to _10 so COM method offsets are correct; each
+// embeds the previous version and appends only the methods that version adds.
 
 type iCoreWebView2_4Vtbl struct {
 	iCoreWebView2_3Vtbl

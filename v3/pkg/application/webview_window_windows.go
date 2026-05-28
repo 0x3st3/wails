@@ -1532,9 +1532,7 @@ func (w *windowsWebviewWindow) WndProc(msg uint32, wparam, lparam uintptr) uintp
 
 		// Now do the actual close
 		w.chromium.ShuttingDown()
-		// Close the WebView2 controller while the HWND is still valid so an
-		// isolated per-window environment's host process exits and releases the
-		// lock on its user-data folder (which destroy() then removes).
+		// Close while the HWND is valid so the isolated host process exits and unlocks its folder.
 		if w.isolatedDataPath != "" {
 			w.chromium.Close()
 		}
@@ -2073,9 +2071,7 @@ func (w *windowsWebviewWindow) setupChromium() {
 	chromium.DataPath = globalApplication.options.Windows.WebviewUserDataPath
 	chromium.BrowserPath = globalApplication.options.Windows.WebviewBrowserPath
 
-	// Per-window proxy + isolated session (fork extension). --proxy-server is an
-	// environment-level Chromium flag, and an isolated session needs its own
-	// user-data folder, so these windows get a unique DataPath.
+	// --proxy-server is an environment-level flag, so isolated windows need a unique DataPath.
 	if w.parent.options.isIsolatedSession() {
 		isolatedPath, perr := makeIsolatedWebviewDataPath(w.parent.id)
 		if perr != nil {
@@ -2263,9 +2259,7 @@ func (w *windowsWebviewWindow) setupChromium() {
 
 }
 
-// injectCookies writes the given cookies into the window's cookie store. It runs
-// before navigation; WebView2's AddOrUpdateCookie is synchronous, so the cookies
-// are present for the initial request.
+// injectCookies must run before navigation; AddOrUpdateCookie is synchronous.
 func (w *windowsWebviewWindow) injectCookies(cookies []WebviewCookie) {
 	cm, err := w.chromium.GetCookieManager()
 	if err != nil {
@@ -2291,8 +2285,6 @@ func (w *windowsWebviewWindow) injectCookies(cookies []WebviewCookie) {
 	}
 }
 
-// makeIsolatedWebviewDataPath returns a fresh per-window WebView2 user-data
-// folder, used to isolate proxy/cookie windows from the shared session.
 func makeIsolatedWebviewDataPath(windowID uint) (string, error) {
 	path := filepath.Join(os.TempDir(), "wails-webview2-isolated", fmt.Sprintf("w%d-%d", windowID, time.Now().UnixNano()))
 	if err := os.MkdirAll(path, 0700); err != nil {

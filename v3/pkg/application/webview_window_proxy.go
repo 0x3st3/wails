@@ -6,9 +6,6 @@ import (
 	"strconv"
 )
 
-// parseWebviewProxyServer splits a proxy server URL into host, port and scheme.
-// Credentials embedded in the URL are ignored; use WebviewProxy.Username and
-// WebviewProxy.Password instead.
 func parseWebviewProxyServer(server string) (host string, port int, scheme string, err error) {
 	u, err := url.Parse(server)
 	if err != nil {
