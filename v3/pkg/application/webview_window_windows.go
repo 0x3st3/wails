@@ -356,9 +356,7 @@ func (w *windowsWebviewWindow) run() {
 	w.showRequested = !options.Hidden
 
 	w.chromium = edge.NewChromium()
-	if globalApplication.options.ErrorHandler != nil {
-		w.chromium.SetErrorCallback(globalApplication.options.ErrorHandler)
-	}
+	w.chromium.SetErrorCallback(globalApplication.handleFatalError)
 
 	exStyle := w32.WS_EX_CONTROLPARENT
 	if options.BackgroundType != BackgroundTypeSolid {
@@ -2153,7 +2151,7 @@ func (w *windowsWebviewWindow) setupChromium() {
 				failure.ProcessDescription = description
 			}
 		}
-		if kind == edge.COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED {
+		if kindErr == nil && kind == edge.COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED {
 			globalApplication.handleFatalError(failure)
 			return
 		}
