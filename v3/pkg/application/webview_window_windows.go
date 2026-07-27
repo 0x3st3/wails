@@ -356,7 +356,9 @@ func (w *windowsWebviewWindow) run() {
 	w.showRequested = !options.Hidden
 
 	w.chromium = edge.NewChromium()
-	w.chromium.SetErrorCallback(globalApplication.handleFatalError)
+	if globalApplication.options.ErrorHandler != nil {
+		w.chromium.SetErrorCallback(globalApplication.options.ErrorHandler)
+	}
 
 	exStyle := w32.WS_EX_CONTROLPARENT
 	if options.BackgroundType != BackgroundTypeSolid {
