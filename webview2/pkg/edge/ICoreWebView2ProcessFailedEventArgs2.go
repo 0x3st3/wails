@@ -10,7 +10,7 @@ import (
 )
 
 type iCoreWebView2ProcessFailedEventArgs2Vtbl struct {
-	_IUnknownVtbl
+	_ICoreWebView2ProcessFailedEventArgsVtbl
 	GetReason                     ComProc
 	GetExitCode                   ComProc
 	GetProcessDescription         ComProc

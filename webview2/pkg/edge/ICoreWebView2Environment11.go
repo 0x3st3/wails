@@ -9,8 +9,59 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+type iCoreWebView2Environment2Vtbl struct {
+	iCoreWebView2EnvironmentVtbl
+	CreateWebResourceRequest ComProc
+}
+
+type iCoreWebView2Environment3Vtbl struct {
+	iCoreWebView2Environment2Vtbl
+	CreateCoreWebView2CompositionController ComProc
+	CreateCoreWebView2PointerInfo           ComProc
+}
+
+type iCoreWebView2Environment4Vtbl struct {
+	iCoreWebView2Environment3Vtbl
+	GetAutomationProviderForWindow ComProc
+}
+
+type iCoreWebView2Environment5Vtbl struct {
+	iCoreWebView2Environment4Vtbl
+	AddBrowserProcessExited    ComProc
+	RemoveBrowserProcessExited ComProc
+}
+
+type iCoreWebView2Environment6Vtbl struct {
+	iCoreWebView2Environment5Vtbl
+	CreatePrintSettings ComProc
+}
+
+type iCoreWebView2Environment7Vtbl struct {
+	iCoreWebView2Environment6Vtbl
+	GetUserDataFolder ComProc
+}
+
+type iCoreWebView2Environment8Vtbl struct {
+	iCoreWebView2Environment7Vtbl
+	AddProcessInfosChanged    ComProc
+	RemoveProcessInfosChanged ComProc
+	GetProcessInfos           ComProc
+}
+
+type iCoreWebView2Environment9Vtbl struct {
+	iCoreWebView2Environment8Vtbl
+	CreateContextMenuItem ComProc
+}
+
+type iCoreWebView2Environment10Vtbl struct {
+	iCoreWebView2Environment9Vtbl
+	CreateCoreWebView2ControllerOptions                ComProc
+	CreateCoreWebView2ControllerWithOptions            ComProc
+	CreateCoreWebView2CompositionControllerWithOptions ComProc
+}
+
 type iCoreWebView2Environment11Vtbl struct {
-	_IUnknownVtbl
+	iCoreWebView2Environment10Vtbl
 	GetFailureReportFolderPath ComProc
 }
 
