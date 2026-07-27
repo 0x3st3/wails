@@ -91,6 +91,8 @@ type WebviewWindowOptions struct {
 	// HTML is the HTML to load in the window.
 	HTML string
 
+	WebviewDataPath string
+
 	// AllowSimpleEventEmit gates the `wails:event:emit:<name>` postMessage
 	// shortcut for this window. When true, JavaScript running in this
 	// window can fire bare-named Wails custom events on the host bus via

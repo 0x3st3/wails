@@ -16,16 +16,16 @@ import (
 	"unsafe"
 
 	"github.com/bep/debounce"
-	"github.com/wailsapp/wails/webview2/webviewloader"
 	"github.com/wailsapp/wails/v3/internal/assetserver"
 	"github.com/wailsapp/wails/v3/internal/assetserver/webview"
 	"github.com/wailsapp/wails/v3/internal/capabilities"
 	"github.com/wailsapp/wails/v3/internal/runtime"
 	"github.com/wailsapp/wails/v3/internal/sliceutil"
+	"github.com/wailsapp/wails/webview2/webviewloader"
 
-	"github.com/wailsapp/wails/webview2/pkg/edge"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/w32"
+	"github.com/wailsapp/wails/webview2/pkg/edge"
 )
 
 var edgeMap = map[string]uintptr{
@@ -356,9 +356,7 @@ func (w *windowsWebviewWindow) run() {
 	w.showRequested = !options.Hidden
 
 	w.chromium = edge.NewChromium()
-	if globalApplication.options.ErrorHandler != nil {
-		w.chromium.SetErrorCallback(globalApplication.options.ErrorHandler)
-	}
+	w.chromium.SetErrorCallback(globalApplication.handleFatalError)
 
 	exStyle := w32.WS_EX_CONTROLPARENT
 	if options.BackgroundType != BackgroundTypeSolid {
@@ -1560,6 +1558,9 @@ func (w *windowsWebviewWindow) WndProc(msg uint32, wparam, lparam uintptr) uintp
 			w.parent.emit(events.Windows.WindowEndResize)
 		}
 	case w32.WM_SETFOCUS:
+		if atomic.LoadUint32(&w.parent.unconditionallyClose) != 0 || w.parent.isDestroyed() {
+			return 0
+		}
 		w.focus()
 		w.parent.emit(events.Windows.WindowSetFocus)
 	case w32.WM_MOVE, w32.WM_MOVING:
@@ -2071,6 +2072,10 @@ func (w *windowsWebviewWindow) setupChromium() {
 	chromium.DataPath = globalApplication.options.Windows.WebviewUserDataPath
 	chromium.BrowserPath = globalApplication.options.Windows.WebviewBrowserPath
 
+	if w.parent.options.WebviewDataPath != "" {
+		chromium.DataPath = w.parent.options.WebviewDataPath
+	}
+
 	// --proxy-server is an environment-level flag, so isolated windows need a unique DataPath.
 	if w.parent.options.isIsolatedSession() {
 		isolatedPath, perr := makeIsolatedWebviewDataPath(w.parent.id)
@@ -2117,6 +2122,41 @@ func (w *windowsWebviewWindow) setupChromium() {
 	chromium.ContainsFullScreenElementChangedCallback = w.fullscreenChanged
 	chromium.NavigationCompletedCallback = w.navigationCompleted
 	chromium.AcceleratorKeyCallback = w.processKeyBinding
+	chromium.ProcessFailedCallback = func(
+		_ *edge.ICoreWebView2,
+		args *edge.ICoreWebView2ProcessFailedEventArgs,
+	) {
+		failure := &WebViewProcessError{
+			WindowName:              w.parent.Name(),
+			WindowID:                w.parent.id,
+			RuntimeVersion:          chromium.RuntimeVersion(),
+			FailureReportFolderPath: chromium.FailureReportFolderPath(),
+		}
+		kind, kindErr := args.GetProcessFailedKind()
+		if kindErr != nil {
+			failure.Kind = "unknown"
+			failure.ProcessDescription = kindErr.Error()
+		} else {
+			failure.Kind = webViewProcessKind(kind)
+		}
+		if details := args.GetICoreWebView2ProcessFailedEventArgs2(); details != nil {
+			defer details.Release()
+			if reason, err := details.GetReason(); err == nil {
+				failure.Reason = webViewProcessReason(reason)
+			}
+			if exitCode, err := details.GetExitCode(); err == nil {
+				failure.ExitCode = exitCode
+			}
+			if description, err := details.GetProcessDescription(); err == nil {
+				failure.ProcessDescription = description
+			}
+		}
+		if kind == edge.COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED {
+			globalApplication.handleFatalError(failure)
+			return
+		}
+		globalApplication.handleError(failure)
+	}
 
 	chromium.Embed(w.hwnd)
 
@@ -2249,6 +2289,9 @@ func (w *windowsWebviewWindow) setupChromium() {
 		}
 		chromium.NavigateToString(w.parent.options.HTML)
 	} else {
+		if w.parent.options.JS != "" {
+			chromium.Init(w.parent.options.JS)
+		}
 		startURL, err := assetserver.GetStartURL(w.parent.options.URL)
 		if err != nil {
 			globalApplication.handleFatalError(err)
@@ -2257,6 +2300,52 @@ func (w *windowsWebviewWindow) setupChromium() {
 		chromium.Navigate(startURL)
 	}
 
+}
+
+func webViewProcessKind(kind edge.COREWEBVIEW2_PROCESS_FAILED_KIND) string {
+	switch kind {
+	case edge.COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED:
+		return "browser_process_exited"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED:
+		return "render_process_exited"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE:
+		return "render_process_unresponsive"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_KIND_FRAME_RENDER_PROCESS_EXITED:
+		return "frame_render_process_exited"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_KIND_UTILITY_PROCESS_EXITED:
+		return "utility_process_exited"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_KIND_SANDBOX_HELPER_PROCESS_EXITED:
+		return "sandbox_helper_process_exited"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED:
+		return "gpu_process_exited"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_KIND_PPAPI_PLUGIN_PROCESS_EXITED:
+		return "ppapi_plugin_process_exited"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_KIND_PPAPI_BROKER_PROCESS_EXITED:
+		return "ppapi_broker_process_exited"
+	default:
+		return "unknown_process_exited"
+	}
+}
+
+func webViewProcessReason(reason edge.COREWEBVIEW2_PROCESS_FAILED_REASON) string {
+	switch reason {
+	case edge.COREWEBVIEW2_PROCESS_FAILED_REASON_UNEXPECTED:
+		return "unexpected"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_REASON_UNRESPONSIVE:
+		return "unresponsive"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_REASON_TERMINATED:
+		return "terminated"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_REASON_CRASHED:
+		return "crashed"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_REASON_LAUNCH_FAILED:
+		return "launch_failed"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_REASON_OUT_OF_MEMORY:
+		return "out_of_memory"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_REASON_PROFILE_DELETED:
+		return "profile_deleted"
+	default:
+		return "unknown"
+	}
 }
 
 // injectCookies must run before navigation; AddOrUpdateCookie is synchronous.

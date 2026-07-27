@@ -527,7 +527,8 @@ func (e *Chromium) PermissionRequested(_ *ICoreWebView2, args *iCoreWebView2Perm
 func (e *Chromium) WebResourceRequested(sender *ICoreWebView2, args *ICoreWebView2WebResourceRequestedEventArgs) uintptr {
 	req, err := args.GetRequest()
 	if err != nil {
-		log.Fatal(err)
+		e.errorCallback(err)
+		return 0
 	}
 	defer req.Release()
 
@@ -546,6 +547,23 @@ func (e *Chromium) AddWebResourceRequestedFilter(filter string, ctx COREWEBVIEW2
 
 func (e *Chromium) Environment() *ICoreWebView2Environment {
 	return e.environment
+}
+
+func (e *Chromium) RuntimeVersion() string {
+	return e.webview2RuntimeVersion
+}
+
+func (e *Chromium) FailureReportFolderPath() string {
+	if e.environment == nil {
+		return ""
+	}
+	environment := e.environment.GetICoreWebView2Environment11()
+	if environment == nil {
+		return ""
+	}
+	defer environment.Release()
+	path, _ := environment.GetFailureReportFolderPath()
+	return path
 }
 
 // AcceleratorKeyPressed is called when an accelerator key is pressed.

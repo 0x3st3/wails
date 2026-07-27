@@ -485,6 +485,16 @@ func (w *WebviewWindow) SetURL(s string) Window {
 	return w
 }
 
+func (w *WebviewWindow) SetCookies(cookies []WebviewCookie) {
+	if w.impl == nil || w.isDestroyed() || len(cookies) == 0 {
+		return
+	}
+	type cookieInjector interface{ injectCookies(cookies []WebviewCookie) }
+	if injector, ok := w.impl.(cookieInjector); ok {
+		InvokeSync(func() { injector.injectCookies(cookies) })
+	}
+}
+
 func (w *WebviewWindow) GetBorderSizes() *LRTB {
 	if w.impl != nil {
 		return InvokeSyncWithResult(w.impl.getBorderSizes)
@@ -783,6 +793,24 @@ func (w *WebviewWindow) HandleMessage(message string) {
 				w.impl.execJS(js)
 			})
 		}
+	case strings.HasPrefix(message, "wails:event:emit-json:"):
+		if !w.options.AllowSimpleEventEmit {
+			w.Error("wails:event:emit-json received but AllowSimpleEventEmit is not set on this window: %v", message)
+			return
+		}
+		raw := strings.TrimPrefix(message, "wails:event:emit-json:")
+		name, payload, ok := strings.Cut(raw, ":")
+		if !ok || name == "" {
+			w.Error("invalid wails:event:emit-json message")
+			return
+		}
+		var data any
+		if err := json.Unmarshal([]byte(payload), &data); err != nil {
+			w.Error("invalid wails:event:emit-json payload: %w", err)
+			return
+		}
+		evt := &CustomEvent{Name: name, Sender: w.Name(), Data: data}
+		globalApplication.Event.EmitEvent(evt)
 	case strings.HasPrefix(message, "wails:event:emit:"):
 		// Forward an event from a page that can't reach the modern HTTP
 		// runtime (e.g. an InitialHTML pop-up loaded with `baseURL:nil`
