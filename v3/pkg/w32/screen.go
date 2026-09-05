@@ -76,12 +76,12 @@ func GetAllScreens() ([]*Screen, error) {
 	var result []*Screen
 	var errMessage string
 
-	// Get cursor position to determine the current monitor
+	// The cursor is unreadable while the process is not attached to the input
+	// desktop (locked or switching session, secure desktop), which must not stop
+	// monitor enumeration.
 	var cursor POINT
 	ret, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
-	if ret == 0 {
-		return nil, fmt.Errorf("GetCursorPos failed")
-	}
+	cursorKnown := ret != 0
 
 	// Enumerate the monitors
 	enumFunc := func(hMonitor uintptr, hdc uintptr, lprcMonitor *RECT, lParam uintptr) uintptr {
@@ -101,7 +101,7 @@ func GetAllScreens() ([]*Screen, error) {
 			MONITORINFOEX: monitor,
 			HMonitor:      hMonitor,
 			IsPrimary:     monitor.DwFlags == MONITORINFOF_PRIMARY,
-			IsCurrent:     rectContainsPoint(monitor.RcMonitor, cursor),
+			IsCurrent:     cursorKnown && rectContainsPoint(monitor.RcMonitor, cursor),
 		}
 
 		// Get monitor name

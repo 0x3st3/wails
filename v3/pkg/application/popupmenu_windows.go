@@ -337,8 +337,9 @@ func (p *Win32Menu) ShowAt(x int, y int) {
 
 func (p *Win32Menu) ShowAtCursor() {
 	x, y, ok := w32.GetCursorPos()
-	if ok == false {
-		globalApplication.fatal("GetCursorPos failed")
+	if !ok {
+		globalApplication.error("GetCursorPos failed")
+		return
 	}
 
 	p.ShowAt(x, y)
