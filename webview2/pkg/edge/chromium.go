@@ -90,7 +90,7 @@ type Chromium struct {
 	ProcessFailedCallback                    func(sender *ICoreWebView2, args *ICoreWebView2ProcessFailedEventArgs)
 	ContainsFullScreenElementChangedCallback func(sender *ICoreWebView2, args *ICoreWebView2ContainsFullScreenElementChangedEventArgs)
 	AcceleratorKeyCallback                   func(uint) bool
-	BasicAuthenticationCallback              func(uri, challenge string, response *ICoreWebView2BasicAuthenticationResponse)
+	BasicAuthenticationCallback              func(uri, challenge string, response *ICoreWebView2BasicAuthenticationResponse) (cancel bool)
 
 	// Error handling
 	globalErrorCallback func(error)
@@ -432,7 +432,13 @@ func (e *Chromium) BasicAuthenticationRequested(sender *ICoreWebView2, args *ICo
 		return 0
 	}
 	defer response.Release()
-	e.BasicAuthenticationCallback(uri, challenge, response)
+	if e.BasicAuthenticationCallback(uri, challenge, response) {
+		// Without either credentials or an explicit cancel, WebView2 falls back
+		// to its own credentials dialog, which a hidden window cannot present.
+		if err := args.PutCancel(true); err != nil {
+			e.errorCallback(err)
+		}
+	}
 	return 0
 }
 
