@@ -2090,14 +2090,15 @@ func (w *windowsWebviewWindow) setupChromium() {
 			if proxy.Username != "" {
 				user, pass := proxy.Username, proxy.Password
 				proxyHost, proxyPort, _, hostErr := parseWebviewProxyServer(proxy.Server)
-				chromium.BasicAuthenticationCallback = func(uri, challenge string, response *edge.ICoreWebView2BasicAuthenticationResponse) {
+				chromium.BasicAuthenticationCallback = func(uri, challenge string, response *edge.ICoreWebView2BasicAuthenticationResponse) bool {
 					// Only answer the configured proxy's own challenge; origin 401s
 					// must not receive proxy creds. WebView2 exposes no auth-type
 					// field and Challenge carries the scheme ("Basic realm=..."),
 					// so the proxy is identified by Uri, which for proxy challenges
-					// is the proxy server's URI.
+					// is the proxy server's URI. Cancel everything else, otherwise
+					// WebView2 prompts for credentials itself.
 					if hostErr != nil || !uriMatchesProxy(uri, proxyHost, proxyPort) {
-						return
+						return true
 					}
 					if err := response.PutUserName(user); err != nil {
 						globalApplication.error("failed to set proxy username: %v", err)
@@ -2105,6 +2106,7 @@ func (w *windowsWebviewWindow) setupChromium() {
 					if err := response.PutPassword(pass); err != nil {
 						globalApplication.error("failed to set proxy password: %v", err)
 					}
+					return false
 				}
 			}
 		}

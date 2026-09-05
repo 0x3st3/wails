@@ -38,6 +38,42 @@ func webviewProxyServerArg(server string) (string, error) {
 	return fmt.Sprintf("%s://%s:%d", scheme, host, port), nil
 }
 
+// canonicalHost lowercases a host and drops a single trailing dot so that
+// "Proxy.Example.com." and "proxy.example.com" compare equal.
+func canonicalHost(host string) string {
+	return strings.ToLower(strings.TrimSuffix(host, "."))
+}
+
+// uriAuthority extracts the host and port a URI addresses, resolving the port
+// from the scheme when it is left implicit. It accepts an authority-only value
+// ("host:port") as well as an absolute URI.
+func uriAuthority(uri string) (host string, port string, ok bool) {
+	u, err := url.Parse(uri)
+	if err != nil || u.Host == "" {
+		// WebView2 is expected to supply an absolute URI. Fall back to an
+		// authority-only value rather than refuse the challenge outright.
+		u, err = url.Parse("//" + strings.TrimPrefix(uri, "//"))
+		if err != nil || u.Host == "" {
+			return "", "", false
+		}
+	}
+	host, port = u.Hostname(), u.Port()
+	if host == "" {
+		return "", "", false
+	}
+	if port == "" {
+		switch strings.ToLower(u.Scheme) {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		default:
+			return "", "", false
+		}
+	}
+	return host, port, true
+}
+
 // uriMatchesProxy reports whether uri addresses the given proxy host and port.
 // WebView2 raises BasicAuthenticationRequested for origin and proxy challenges
 // alike and provides no auth-type field; for proxy challenges the event's Uri is
@@ -46,23 +82,12 @@ func uriMatchesProxy(uri, proxyHost string, proxyPort int) bool {
 	if uri == "" || proxyHost == "" {
 		return false
 	}
-	u, err := url.Parse(uri)
-	if err != nil {
+	host, port, ok := uriAuthority(uri)
+	if !ok {
 		return false
 	}
-	if !strings.EqualFold(u.Hostname(), proxyHost) {
+	if canonicalHost(host) != canonicalHost(proxyHost) {
 		return false
-	}
-	port := u.Port()
-	if port == "" {
-		switch u.Scheme {
-		case "http":
-			port = "80"
-		case "https":
-			port = "443"
-		default:
-			return false
-		}
 	}
 	return port == strconv.Itoa(proxyPort)
 }

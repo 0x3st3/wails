@@ -50,6 +50,21 @@ func (i *ICoreWebView2BasicAuthenticationRequestedEventArgs) GetChallenge() (str
 	return challenge, nil
 }
 
+func (i *ICoreWebView2BasicAuthenticationRequestedEventArgs) PutCancel(cancel bool) error {
+	var _cancel uintptr
+	if cancel {
+		_cancel = 1
+	}
+	hr, _, _ := i.vtbl.PutCancel.Call(
+		uintptr(unsafe.Pointer(i)),
+		_cancel,
+	)
+	if windows.Handle(hr) != windows.S_OK {
+		return windows.Errno(hr)
+	}
+	return nil
+}
+
 func (i *ICoreWebView2BasicAuthenticationRequestedEventArgs) GetResponse() (*ICoreWebView2BasicAuthenticationResponse, error) {
 	var response *ICoreWebView2BasicAuthenticationResponse
 	hr, _, _ := i.vtbl.GetResponse.Call(
