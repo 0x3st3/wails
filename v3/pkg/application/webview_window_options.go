@@ -121,6 +121,9 @@ type WebviewWindowOptions struct {
 	// JS is the JavaScript to load in the window.
 	JS string
 
+	// JSAllFrames injects JS at document start in the main frame and subframes.
+	JSAllFrames bool
+
 	// CSS is the CSS to load in the window.
 	CSS string
 

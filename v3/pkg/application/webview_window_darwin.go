@@ -483,6 +483,19 @@ void windowExecJSNoAlloc(void* nsWindow, const char* js) {
 	[window.webView evaluateJavaScript:[NSString stringWithUTF8String:js] completionHandler:nil];
 }
 
+// Inject JavaScript at document start in the main frame and every subframe.
+void windowAddUserScriptAllFrames(void* nsWindow, const char* js) {
+	WebviewWindow* window = (WebviewWindow*)nsWindow;
+	NSString* source = [NSString stringWithUTF8String:js];
+	WKUserScript* script = [[WKUserScript alloc]
+		initWithSource:source
+		injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+		forMainFrameOnly:NO];
+	[window.webView.configuration.userContentController addUserScript:script];
+	[script release];
+	free((void*)js);
+}
+
 // Make NSWindow backdrop translucent
 void windowSetTranslucent(void* nsWindow) {
 	// Get window
@@ -1633,6 +1646,10 @@ func (w *macosWebviewWindow) run() {
 		startURL, err := assetserver.GetStartURL(options.URL)
 		if err != nil {
 			globalApplication.handleFatalError(err)
+		}
+
+		if options.JSAllFrames && options.JS != "" {
+			C.windowAddUserScriptAllFrames(w.nsWindow, C.CString(options.JS))
 		}
 
 		if len(options.Cookies) > 0 {

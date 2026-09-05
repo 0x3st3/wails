@@ -519,9 +519,6 @@ func (w *windowsWebviewWindow) run() {
 	switch options.Windows.Theme {
 	case SystemDefault:
 		isDark := w32.IsCurrentlyDarkMode()
-		if isDark {
-			w32.AllowDarkModeForWindow(w.hwnd, true)
-		}
 		w.updateTheme(isDark)
 		// Don't initialize default dark theme here if custom theme might be set
 		// The updateTheme call above will handle both default and custom themes
@@ -533,7 +530,6 @@ func (w *windowsWebviewWindow) run() {
 	case Light:
 		w.updateTheme(false)
 	case Dark:
-		w32.AllowDarkModeForWindow(w.hwnd, true)
 		w.updateTheme(true)
 		// Don't initialize default dark theme here if custom theme might be set
 		// The updateTheme call above will handle custom themes
@@ -2093,9 +2089,14 @@ func (w *windowsWebviewWindow) setupChromium() {
 			chromium.AdditionalBrowserArgs = append(chromium.AdditionalBrowserArgs, "--proxy-server="+serverArg)
 			if proxy.Username != "" {
 				user, pass := proxy.Username, proxy.Password
+				proxyHost, proxyPort, _, hostErr := parseWebviewProxyServer(proxy.Server)
 				chromium.BasicAuthenticationCallback = func(uri, challenge string, response *edge.ICoreWebView2BasicAuthenticationResponse) {
-					// Only answer proxy challenges; origin 401s must not receive proxy creds.
-					if !strings.HasPrefix(strings.ToLower(challenge), "proxy") {
+					// Only answer the configured proxy's own challenge; origin 401s
+					// must not receive proxy creds. WebView2 exposes no auth-type
+					// field and Challenge carries the scheme ("Basic realm=..."),
+					// so the proxy is identified by Uri, which for proxy challenges
+					// is the proxy server's URI.
+					if hostErr != nil || !uriMatchesProxy(uri, proxyHost, proxyPort) {
 						return
 					}
 					if err := response.PutUserName(user); err != nil {
@@ -2343,6 +2344,12 @@ func webViewProcessReason(reason edge.COREWEBVIEW2_PROCESS_FAILED_REASON) string
 		return "out_of_memory"
 	case edge.COREWEBVIEW2_PROCESS_FAILED_REASON_PROFILE_DELETED:
 		return "profile_deleted"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_REASON_NORMAL_EXIT:
+		return "normal_exit"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_REASON_ABNORMAL_EXIT:
+		return "abnormal_exit"
+	case edge.COREWEBVIEW2_PROCESS_FAILED_REASON_INTEGRITY_FAILURE:
+		return "integrity_failure"
 	default:
 		return "unknown"
 	}

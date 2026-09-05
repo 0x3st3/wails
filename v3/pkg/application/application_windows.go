@@ -226,6 +226,7 @@ func (m *windowsApp) init() {
 }
 
 func (m *windowsApp) wndProc(hwnd w32.HWND, msg uint32, wParam, lParam uintptr) uintptr {
+	defer handlePanic()
 
 	// Handle the invoke callback
 	if msg == wmInvokeCallback {

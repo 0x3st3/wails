@@ -629,6 +629,18 @@ func (w *WebviewWindow) ExecJS(js string) {
 	}
 }
 
+// ExecJSImmediate executes JavaScript without waiting for the Wails runtime.
+// This is intended for windows that display external pages where the Wails
+// runtime is deliberately unavailable.
+func (w *WebviewWindow) ExecJSImmediate(js string) {
+	if w.impl == nil || w.isDestroyed() {
+		return
+	}
+	InvokeSync(func() {
+		w.impl.execJS(js)
+	})
+}
+
 // Fullscreen sets the window to fullscreen mode. Min/Max size constraints are disabled.
 func (w *WebviewWindow) Fullscreen() Window {
 	if w.impl == nil || w.isDestroyed() {
